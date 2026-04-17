@@ -47,7 +47,7 @@
 
 
 \begin{center}
-\Large\textbf{Physics-Informed Machine Learning for Regional Geomagnetic Hazard Forecasting}\\
+\Large\textbf{Physics-Informed Machine Learning for Regional Geomagnetic Disturbance Forecasting}\\
 \end{center}
 
 \section*{Overview}
@@ -63,7 +63,7 @@ Apply physics-informed ML models to improve regional forecasting of hazardous ge
 Baseline & Persistence + Climatology & Predict label/rate from recent history; required floor for all skill scores \\ \hline
 Linear reference & Logistic Regression & Establishes linear ceiling; coefficient-level interpretability \\ \hline
 \textbf{Primary} & \textbf{LightGBM} & Nonlinear tabular classifier; handles imbalance and missing data natively; SHAP-compatible \\ \hline
-\textbf{Secondary} & \textbf{LSTM} & Established for solar wind sequence modeling;handles variable-length temporal dependencies; tests whether learned temporal structure adds skill beyond LightGBM's engineered lag features \\ \hline
+\textbf{Secondary} & \textbf{LSTM} & Sequence classifier; tests whether learned temporal structure adds skill beyond LightGBM's engineered lag features \\ \hline
 \end{tabular}
 \caption{Classification task model hierarchy: baselines, linear reference, and primary/secondary learners.}
 \end{table}
@@ -112,7 +112,7 @@ Relative to prior work, this project advances in three directions:
 \subsection*{Approach}
 
 \subsubsection*{Methodology}
-The primary model is a LightGBM binary classifier trained on the fused feature matrix described above. LightGBM is selected because it natively handles class imbalance and missing values, is computationally efficient, and supports SHAP-based feature attribution. These properties are directly relevant given the irregular LEO orbital coverage, the sparse hazardous-event rate, and the need for interpretable source attribution across five input layers. The choice is further motivated by Camporeale et al.\ (2020), who demonstrated that boosted tree classifiers effectively complement physics-based models for regional $|dB/dt|$ threshold exceedance.\\
+The primary model is a LightGBM binary classifier trained on the fused feature matrix described above. LightGBM is selected for its native handling of class imbalance, missing-value tolerance, computational efficiency, and compatibility with SHAP-based feature attribution — properties that are directly relevant given the irregular LEO data coverage and the severe class imbalance in hazardous-$|dB/dt|$ events. This model choice is consistent with the gray-box operational forecasting approach of Camporeale et al.\ (2020), who demonstrated that boosted tree classifiers effectively complement physics-based models for regional $|dB/dt|$ threshold exceedance.\\
 
 \noindent The approach is physics-informed in two ways: \\
 \begin{enumerate}
@@ -144,6 +144,21 @@ Physics-informed features are central to the input representation:
   \item \textbf{Recent ground state:} Lagged $|dB/dt|$ from the target stations, providing short-memory persistence features consistent with the gray-box approach of Camporeale et al. (2020).
 \end{itemize}
 
+\subsection*{Models}
+\begin{table}[h!]
+\centering
+\begin{tabular}{|l|l|p{8cm}|}
+\hline
+\textbf{Model} & \textbf{Role} & \textbf{Key Justification} \\ \hline
+Persistence & Baseline & Minimum operational bar; any useful model must exceed it \\ \hline
+Climatology & Baseline & Denominator for Brier Skill Score \\ \hline
+Logistic Regression & Linear reference & Establishes linear ceiling; interpretable coefficient view \\ \hline
+LightGBM & \textbf{Primary model} & Handles imbalance, missing data, and tabular heterogeneity natively; SHAP-compatible \\ \hline
+LSTM & Optional extension & Tests whether learned temporal structure adds skill beyond lag features \\ \hline
+\end{tabular}
+\caption{Model Roles and Justifications}
+\end{table}
+
 \section*{Success Criteria}
 The project will be considered successful if the primary LightGBM classifier outperforms persistence and climatology on the held-out 2024 test set. The main evaluation metric is Heidke Skill Score (HSS), with a target of \(HSS > 0.35\). A secondary evaluation will include Brier Skill Score (\(BSS > 0.10\) relative to climatology), ROC AUC, precision at the selected operating threshold, and calibration assessed with a reliability diagram and expected calibration error. If the LSTM also outperforms LightGBM, that will support the hypothesis that explicit temporal memory adds predictive value beyond engineered lag features.
 
@@ -153,6 +168,10 @@ The project will be considered successful if the primary LightGBM classifier out
 \begin{enumerate}
     \item Billcliff, N., et al. (2026). Extended lead-time geomagnetic storm forecasting with solar wind ensembles and machine learning. \textit{Space Weather}.
  
+    \item Bodnar, C., et al. (2025). A foundation model for the Earth system. \textit{Nature}.
+ 
+    \item Camporeale, E., et al. (2017). Classification of solar wind with machine learning. \textit{Journal of Geophysical Research: Space Physics}.
+ 
     \item Camporeale, E., et al. (2020). A gray-box model for a probabilistic estimate of regional ground magnetic perturbations: Enhancing the NOAA operational Geospace model with machine learning. \textit{Journal of Geophysical Research: Space Physics}.
  
     \item Camporeale, E., et al. (2025). Verification of the NOAA Space Weather Prediction Center solar flare forecast 1998--2024. \textit{Space Weather}.
@@ -161,5 +180,4 @@ The project will be considered successful if the primary LightGBM classifier out
  
     \item Sun, Z., et al. (2022). A review of Earth artificial intelligence. \textit{Computers \& Geosciences}.
 \end{enumerate}
-
 \end{document}
