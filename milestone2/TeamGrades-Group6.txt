@@ -1,0 +1,28 @@
+WEEK 3 TASKS
+
+
+1. Solar Feature Investigation
+- Evaluated the potential of adding a solar-level feature to represent different categories of MHD turbulence, based on insights from Billcliff (2026).
+- Decided against adding this feature at this stage due to the additional complexity it would introduce too much additional work.
+- Choose GOES X-ray flux as the sole solar-level proxy due to time constraints of course.
+  
+
+2. Project Organization
+- Restructured the project repository to follow a clean, standardized layout inspired by other successful projects.
+- Created top-level directories: configs/, data/, docs/, models/, notebooks/, results/, scripts/, src/, and tests/.
+- Consolidated documentation, research notes, and milestones under docs/.
+- Renamed scripts with numbered prefixes to indicate pipeline order.
+- Moved source code into a proper \texttt{src/swmi/} package structure for better modularity and maintainability.
+
+
+3. Literature Review: Lag Features and Multi-Altitude Propagation
+- Reviewed Wing (2016) for its treatment of Mutual Information (MI), Conditional Mutual Information (CMI), and Transfer Entropy as nonlinear feature importance measures, which are relevant for understanding solar wind--magnetosphere relationships.
+Reviewed Hyndman and Athanasopoulos (Forecasting: Principles and Practice) and Brownlee (Deep Learning for Time Series Forecasting) for general guidance on lag construction in multi-step causal chains.
+- Reviewed lag construction techniques across the Sun -> L1 -> GEO -> LEO -> ground propagation chain with a focus on avoiding data leakage. The improper lag alignment in a multi-altitude causal chain can easily introduce future information into training features.
+
+
+4. Bug Fix: Newell Coupling NaN Inflation
+- Identified an issue with the Newell coupling lag features, which had an unexpectedly high null value rate of over 30%.
+- Discovered that a single NaN anywhere in a 30 minute rolling window was causing the entire window's lag value to be null.
+- Implemented a fix to compute the lag using only valid values within the window, and added a companion n_points quality column to track data density per window.
+- This fix reduced the null rate to roughly 8% to 10%, significantly improving the quality of the lag features.

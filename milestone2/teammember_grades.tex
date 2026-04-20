@@ -1,0 +1,85 @@
+\documentclass{article}
+
+% Required packages
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{tikz}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+
+% Set page geometry
+\geometry{a4paper, margin=1in}
+
+% Configure listings for Python
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=true,
+  captionpos=b,
+  tabsize=4,
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  commentstyle=\color{gray}\textit,
+  keywordstyle=\color{blue}\bfseries,
+  stringstyle=\color{red}
+}
+
+% For centering images and tables
+\usepackage{float}
+
+\begin{document}
+
+\pagestyle{fancy}
+\chead{DSC 288: Capstone (Spring 2026)}
+\lhead{Week 3: Team Member Grades}
+\rhead{R. Scotty Rogers}
+
+\section*{Week 3 Tasks}
+
+\begin{enumerate}
+
+  \item \textbf{Solar Feature Investigation (Solar MHD Turbulence)}
+  \begin{itemize}
+    \item Evaluated the potential of adding a solar-level feature to represent different categories of MHD turbulence, based on insights from Billcliff (2026).
+    \item Decided against adding this feature at this stage due to the additional complexity it would introduce without a clear payoff.
+    \item Choose GOES X-ray flux as the sole solar-level proxy due to time constraints of course.
+  \end{itemize}
+
+  \item \textbf{Project Restructuring}
+  \begin{itemize}
+    \item Restructured the project repository to follow a clean, standardized layout inspired by other successful projects.
+    \item Created top-level directories: \texttt{configs/}, \texttt{data/}, \texttt{docs/}, \texttt{models/}, \texttt{notebooks/}, \texttt{results/}, \texttt{scripts/}, \texttt{src/}, and \texttt{tests/}.
+    \item Consolidated documentation, research notes, and milestones under \texttt{docs/}.
+    \item Renamed scripts with numbered prefixes to indicate pipeline order.
+    \item Moved source code into a proper \texttt{src/swmi/} package structure for better modularity and maintainability.
+  \end{itemize}
+
+  \item \textbf{Literature Review: Lag Features and Multi-Altitude Propagation}
+  \begin{itemize}
+    \item Reviewed Wing (2016) for its treatment of Mutual Information (MI), Conditional Mutual Information (CMI), and Transfer Entropy as nonlinear feature importance measures, which are relevant for understanding solar wind--magnetosphere relationships.
+    \item Consulted Hyndman and Athanasopoulos (\textit{Forecasting: Principles and Practice}) and Brownlee (\textit{Deep Learning for Time Series Forecasting}) for general guidance on lag construction in multi-step causal chains.
+    \item Reviewed lag construction techniques across the Sun $\rightarrow$ L1 $\rightarrow$ GEO $\rightarrow$ LEO $\rightarrow$ ground propagation chain with a focus on avoiding data leakage. The improper lag alignment in a multi-altitude causal chain can easily introduce future information into training features.
+  \end{itemize}
+
+  \item \textbf{Bug Fix: Newell Coupling NaN Inflation}
+  \begin{itemize}
+    \item Identified an issue with the Newell coupling lag features, which had an unexpectedly high null value rate of over 30\%.
+    \item Discovered that a single NaN anywhere in a 30-minute rolling window was causing the entire window's lag value to be null.
+    \item Implemented a fix to compute the lag using only valid values within the window, and added a companion \texttt{n\_points} quality column to track data density per window.
+    \item This fix reduced the null rate to roughly 8 to 10\%, significantly improving the quality of the lag features.
+  \end{itemize}
+
+\end{enumerate}
+
+\end{document}
