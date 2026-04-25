@@ -33,7 +33,6 @@ TODO: Refactor Dask parallelization; add worker error handling; integrate into s
 """
 
 import os
-import sys
 import math
 import functools
 import importlib.metadata
@@ -42,10 +41,9 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-import config
-from logger import get_logger
-from schema import validate_output_schema
+from swmi.preprocessing.validation import validate_output_schema
+from swmi.utils import config
+from swmi.utils.logger import get_logger, install_dask_worker_file_logging
 
 log = get_logger(__name__)
 
@@ -510,6 +508,8 @@ def build_leo_index_month(year: int, month: int) -> None:
     client = Client(cluster)
     log.info("Dask cluster started: %s", client.dashboard_link)
 
+    install_dask_worker_file_logging(client)
+
     try:
         futures = []
         for day in days:
@@ -524,20 +524,34 @@ def build_leo_index_month(year: int, month: int) -> None:
             futures.append(fut)
 
         log.info("Dispatching %d daily chunks to %d workers...", len(futures), n_workers)
-        results = client.gather(futures)
+        results = client.gather(futures, errors="return")
 
     finally:
         client.close()
         cluster.close()
         log.info("Dask cluster closed.")
 
-    valid_results = [
-        r for r in results
-        if r is not None and not r.empty and "res_H" in r.columns
-    ]
+    valid_results: list[pd.DataFrame] = []
+    for day, res in zip(days, results):
+        if isinstance(res, BaseException):
+            log.error("LEO index daily chunk raised for %s: %s", day, res, exc_info=res)
+            raise RuntimeError(
+                f"LEO index Dask worker failure for {month_str} (day={day!r})."
+            ) from res
+        if res is None or res.empty or "res_H" not in res.columns:
+            log.error(
+                "LEO index daily chunk returned invalid data for %s (empty=%s, res_H=%s).",
+                day,
+                res is None or getattr(res, "empty", True),
+                "res_H" in res.columns if res is not None and not res.empty else False,
+            )
+            continue
+        valid_results.append(res)
+
     if not valid_results:
-        log.error("All daily chunks failed for %s. No LEO index produced.", month_str)
-        return
+        raise RuntimeError(
+            f"No valid LEO index daily chunks for {month_str} after Dask run (all days empty/invalid)."
+        )
 
     df_res = pd.concat(valid_results, ignore_index=True)
     df_res = df_res.sort_values("timestamp").reset_index(drop=True)

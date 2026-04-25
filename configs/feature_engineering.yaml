@@ -1,1 +1,78 @@
-# Rolling windows, scaling params, cyclical encoding params
+# ============================================================================
+# Feature Engineering Configuration
+# ============================================================================
+# Contains all scientific invariants and feature computation parameters.
+# WARNING: Changing any invariant invalidates ALL prior outputs and requires
+# full reprocessing from raw data.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Scientific Invariants — DO NOT CHANGE without full reprocessing
+# ---------------------------------------------------------------------------
+scientific_invariants:
+  reference_field: "IGRF"         # IGRF or CHAOS; must be consistent across all training
+  qdlat_high_lat_min: 55.0       # degrees; primary auroral zone filter
+  decay_halflife_min: 10.0       # minutes; exponential decay for LEO persistence
+  dbdt_method: "backward"        # "backward" is operationally correct (no future leakage)
+
+# ---------------------------------------------------------------------------
+# LEO index physics thresholds
+# Swarm orbital period ~94 min; most 1-min windows are empty.
+# The 10-min decay half-life means a stale value retains ~50% of its
+# original magnitude after one orbital gap.
+# ---------------------------------------------------------------------------
+leo_index:
+  qdlat_mid_lat_min: 20.0       # degrees; lower bound for mid-lat sub-index
+  qdlat_mid_lat_max: 55.0       # degrees; upper bound for mid-lat sub-index
+  mlt_dayside_start: 6.0        # hours; dayside MLT window start
+  mlt_dayside_end: 18.0         # hours; dayside MLT window end
+
+# ---------------------------------------------------------------------------
+# dB/dt computation
+# "backward" is operationally correct (requires only past data).
+# "centered" reduces edge noise but introduces future data leakage.
+# ---------------------------------------------------------------------------
+dbdt:
+  method: "backward"
+  gap_threshold_sec: 90.0       # 1.5x expected 60s cadence; rejects genuine gaps
+
+# ---------------------------------------------------------------------------
+# Rolling statistics configuration
+# Applied to OMNI and GOES features for temporal context.
+# ---------------------------------------------------------------------------
+rolling_stats:
+  windows_min: [15, 30, 60, 120]   # rolling window sizes in minutes
+  min_valid_fraction: 0.50          # minimum fraction of valid points to emit stat
+  statistics: ["mean", "std", "min", "max"]
+
+# ---------------------------------------------------------------------------
+# Cyclical encoding parameters
+# Sin/cos encoding for temporal features; values in [-1, 1].
+# ---------------------------------------------------------------------------
+cyclical_encoding:
+  features:
+    - name: "hour_of_day"
+      period: 24
+    - name: "day_of_year"
+      period: 365.25
+    - name: "month_of_year"
+      period: 12
+
+# ---------------------------------------------------------------------------
+# Newell coupling function
+# DO NOT MODIFY the physics in newell_coupling.py (Warning #4).
+# These are documentation parameters only.
+# ---------------------------------------------------------------------------
+newell_coupling:
+  exponent_bt: 0.6667            # 2/3
+  exponent_vsw: 1.3333           # 4/3
+  clock_angle_exponent: 2.6667   # 8/3
+
+# ---------------------------------------------------------------------------
+# Scaling / normalization
+# Applied after feature construction, before sequence building.
+# ---------------------------------------------------------------------------
+scaling:
+  method: "standard"             # "standard" (z-score) or "robust" (IQR)
+  version: "1"                   # increment when re-fitting on different data
+  fit_on: "train"                # fit scaler on training set only

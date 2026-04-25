@@ -1,1 +1,95 @@
-# M0/M1/M2 hyperparameters
+# ============================================================================
+# Model Baseline Configuration
+# ============================================================================
+# Hyperparameters for M0/M1/M2 baseline models.
+# Scientific invariants (forecast horizon, split buffer) are here because
+# they define the modeling question, not the feature engineering.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Scientific Invariants — DO NOT CHANGE without invalidating results
+# ---------------------------------------------------------------------------
+forecast_horizon_min: 60          # target is dB/dt at T + 60 minutes
+split_buffer_days: 7              # storm-recovery autocorrelation buffer
+
+# ---------------------------------------------------------------------------
+# Sequence parameters
+# ---------------------------------------------------------------------------
+sequence:
+  input_window_min: 120           # 2-hour input window
+  stride_min: 1                   # sliding window stride
+  max_gap_fraction: 0.10          # reject sequences with >10% gaps
+
+# ---------------------------------------------------------------------------
+# M0: Persistence baseline
+# Predicts dB/dt(t+60) = dB/dt(t) for each station independently.
+# No trainable parameters.
+# ---------------------------------------------------------------------------
+m0_persistence:
+  description: "Naive persistence: forecast = current value"
+
+# ---------------------------------------------------------------------------
+# M1: Log-linear multi-output regression
+# Multi-output linear regression on log-transformed features.
+# Serves as the linear baseline for feature importance analysis.
+# ---------------------------------------------------------------------------
+m1_loglinear:
+  description: "Log-linear multi-output regression"
+  regularization: "ridge"
+  alpha: 1.0                      # L2 penalty strength
+  fit_intercept: true
+
+# ---------------------------------------------------------------------------
+# M2: Gradient boosting multi-output
+# LightGBM or XGBoost per-station models (independent outputs).
+# ---------------------------------------------------------------------------
+m2_gbm:
+  description: "Gradient boosted trees per station"
+  framework: "lightgbm"
+  n_estimators: 500
+  max_depth: 6
+  learning_rate: 0.05
+  min_child_samples: 50
+  subsample: 0.8
+  colsample_bytree: 0.8
+  early_stopping_rounds: 50
+
+# ---------------------------------------------------------------------------
+# M3 (future): LSTM multi-output
+# Placeholder for neural baseline; not in P0 scope.
+# ---------------------------------------------------------------------------
+# m3_lstm:
+#   hidden_size: 128
+#   num_layers: 2
+#   dropout: 0.2
+#   batch_size: 256
+#   max_epochs: 100
+#   patience: 10
+
+# ---------------------------------------------------------------------------
+# Loss function
+# NaN-aware loss: missing stations are masked, not zero-filled.
+# Uses torch.nanmean() or custom binary mask. (Warning #22)
+# ---------------------------------------------------------------------------
+loss:
+  function: "nan_aware_mse"
+  reduction: "mean"               # mean over valid (non-NaN) stations
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+training:
+  batch_size: 512
+  max_epochs: 100
+  patience: 15                    # early stopping patience
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  gradient_clip_norm: 1.0
+
+# ---------------------------------------------------------------------------
+# Experiment tracking
+# ---------------------------------------------------------------------------
+experiment:
+  name: "exp001_baseline"
+  output_dir: "results/experiments/exp001_baseline"
+  checkpoint_dir: "models/checkpoints/exp001"

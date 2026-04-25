@@ -7,18 +7,34 @@ Scientific invariants that must NOT be altered without updating the data manifes
 - DECAY_HALFLIFE_MIN: controls LEO persistence physics; treat as hyperparameter.
 - QDLAT_HIGH_LAT_MIN: determines auroral zone membership; changing it re-defines
   the spatial index meaning and requires re-processing all LEO parquet files.
-TODO: Add YAML loader; migrate scientific invariants to configs/data_retrieval.yaml
+
+YAML config loading:
+    Use ``load_config(path)`` to load any YAML config file.
+    Use ``validate_scientific_invariants(cfg)`` to cross-check YAML against
+    the Python constants defined here.
 """
 
 import os
+import logging
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ImportError:
+    yaml = None  # type: ignore[assignment]
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Directory layout
 # ---------------------------------------------------------------------------
 RAW_DATA_DIR      = "data/raw"
+INTERIM_DIR       = "data/interim"
 PROCESSED_DIR     = "data/processed"
 FEATURES_DIR      = "data/processed/features"
 SEQUENCES_DIR     = "data/sequences"
+STATION_METADATA_DIR = "data/external/station_metadata"
 MODELS_DIR        = "models"
 LOGS_DIR          = "logs"
 ARTIFACTS_DIR     = "models/artifacts"   # scalers, encoders
@@ -51,7 +67,7 @@ MASTER_CADENCE = "1min"     # all sources resampled/aligned to this
 # Satellites >=16 are routed to the NGDC modern 1-minute product (GOES-R series).
 # ---------------------------------------------------------------------------
 GOES_LEGACY_SATS  = [13, 15]
-GOES_MODERN_SATS  = [16, 17, 18]
+GOES_MODERN_SATS  = [16, 17, 18, 19]
 GOES_LEGACY_CUTOFF_YEAR = 2016   # year >= this uses the modern parser
 
 # ---------------------------------------------------------------------------
@@ -142,3 +158,193 @@ DASK_WORKER_MEMORY_LIMIT = "4GB"   # per-worker; prevents OOM kills
 # Increment when re-fitting on a different training period or feature set.
 # ---------------------------------------------------------------------------
 SCALER_VERSION = "1"
+
+# ---------------------------------------------------------------------------
+# Minimum completeness threshold for data quality checks
+# ---------------------------------------------------------------------------
+MIN_COMPLETENESS_THRESHOLD = 0.50
+
+# ---------------------------------------------------------------------------
+# GOES primary satellite (default; overridden by YAML per-year priority)
+# ---------------------------------------------------------------------------
+GOES_PRIMARY_SATELLITE = "GOES-16"
+
+
+# ===================================================================
+# YAML Configuration Loader
+# ===================================================================
+
+# Map of scientific invariants: (yaml_path, python_constant_value)
+# Used by validate_scientific_invariants() to detect drift between
+# YAML configs and hardcoded Python constants.
+_SCIENTIFIC_INVARIANTS = {
+    "REFERENCE_FIELD":       ("scientific_invariants.reference_field", REFERENCE_FIELD),
+    "QDLAT_HIGH_LAT_MIN":   ("scientific_invariants.qdlat_high_lat_min", QDLAT_HIGH_LAT_MIN),
+    "DECAY_HALFLIFE_MIN":   ("scientific_invariants.decay_halflife_min", DECAY_HALFLIFE_MIN),
+    "DBDT_METHOD":          ("scientific_invariants.dbdt_method", DBDT_METHOD),
+    "FORECAST_HORIZON_MIN": ("forecast_horizon_min", FORECAST_HORIZON_MIN),
+    "SPLIT_BUFFER_DAYS":    ("split_buffer_days", SPLIT_BUFFER_DAYS),
+}
+
+
+def _resolve_dotpath(cfg: dict, dotpath: str) -> Any:
+    """Resolve a dot-separated path in a nested dict.
+
+    Parameters
+    ----------
+    cfg : dict
+        Nested configuration dictionary.
+    dotpath : str
+        Dot-separated key path (e.g., ``"scientific_invariants.reference_field"``).
+
+    Returns
+    -------
+    Any
+        The value at the specified path.
+
+    Raises
+    ------
+    KeyError
+        If any key in the path is missing.
+    """
+    keys = dotpath.split(".")
+    current = cfg
+    for key in keys:
+        if not isinstance(current, dict):
+            raise KeyError(f"Expected dict at '{key}' in path '{dotpath}', got {type(current)}")
+        if key not in current:
+            raise KeyError(f"Key '{key}' not found in config at path '{dotpath}'")
+        current = current[key]
+    return current
+
+
+def load_config(path: str | Path) -> dict:
+    """Load a YAML configuration file and return a nested dict.
+
+    Parameters
+    ----------
+    path : str or Path
+        Absolute or relative path to a YAML file (e.g.,
+        ``"configs/data_retrieval.yaml"``).
+
+    Returns
+    -------
+    dict
+        Parsed YAML content as a nested dictionary.
+
+    Raises
+    ------
+    ImportError
+        If ``pyyaml`` is not installed.
+    FileNotFoundError
+        If the specified YAML file does not exist.
+    ValueError
+        If the YAML file is empty or contains invalid YAML.
+
+    Examples
+    --------
+    >>> cfg = load_config("configs/data_retrieval.yaml")
+    >>> cfg["master_cadence"]
+    '1min'
+    >>> cfg["goes"]["satellite_priority"][2017]
+    ['GOES-16', 'GOES-15']
+    """
+    if yaml is None:
+        raise ImportError(
+            "pyyaml is required for YAML config loading. "
+            "Install with: uv add pyyaml"
+        )
+
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Config file not found: {path.resolve()}. "
+            f"Check that the path is correct relative to the project root."
+        )
+
+    with open(path, "r", encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+
+    if cfg is None:
+        raise ValueError(
+            f"Config file is empty or contains only comments: {path}. "
+            "Populate the file with valid YAML content."
+        )
+
+    if not isinstance(cfg, dict):
+        raise ValueError(
+            f"Config file must contain a YAML mapping (dict), "
+            f"got {type(cfg).__name__}: {path}"
+        )
+
+    log.debug("Loaded config from %s (%d top-level keys)", path, len(cfg))
+    return cfg
+
+
+def validate_scientific_invariants(cfg: dict, config_name: str = "unknown") -> None:
+    """Cross-validate YAML config values against hardcoded Python invariants.
+
+    This function ensures that scientific invariants defined in YAML config
+    files have not drifted from the authoritative values in this Python
+    module.  Any mismatch indicates a configuration error that would
+    invalidate prior outputs.
+
+    Parameters
+    ----------
+    cfg : dict
+        Parsed YAML configuration dictionary.
+    config_name : str
+        Human-readable name for the config (used in error messages).
+
+    Raises
+    ------
+    ValueError
+        If any scientific invariant in the YAML differs from its
+        approved Python constant value.
+
+    Notes
+    -----
+    Only checks invariants whose YAML paths exist in ``cfg``.  Missing
+    paths are logged as warnings but do not raise — this allows partial
+    configs (e.g., ``model_baseline.yaml`` does not contain LEO physics
+    thresholds).
+    """
+    violations = []
+
+    for name, (dotpath, expected) in _SCIENTIFIC_INVARIANTS.items():
+        try:
+            actual = _resolve_dotpath(cfg, dotpath)
+        except KeyError:
+            # Path doesn't exist in this config file — that's OK for
+            # partial configs. Only log at DEBUG.
+            log.debug(
+                "[%s] Invariant %s (path '%s') not present in config.",
+                config_name, name, dotpath,
+            )
+            continue
+
+        # Type-flexible comparison: YAML may load 55.0 as int 55
+        if type(expected) is float:
+            if abs(float(actual) - expected) > 1e-9:
+                violations.append(
+                    f"  {name}: YAML={actual!r} (path={dotpath}), "
+                    f"Python={expected!r}"
+                )
+        elif str(actual) != str(expected):
+            violations.append(
+                f"  {name}: YAML={actual!r} (path={dotpath}), "
+                f"Python={expected!r}"
+            )
+
+    if violations:
+        msg = (
+            f"[{config_name}] Scientific invariant mismatch detected!\n"
+            f"The following YAML values differ from approved Python constants:\n"
+            + "\n".join(violations)
+            + "\n\nThis invalidates all prior outputs. Either:\n"
+            "  1. Restore the approved values in the YAML, or\n"
+            "  2. Update the Python constants in config.py and reprocess all data."
+        )
+        raise ValueError(msg)
+
+    log.debug("[%s] All scientific invariants validated OK.", config_name)

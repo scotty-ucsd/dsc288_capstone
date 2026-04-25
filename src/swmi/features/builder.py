@@ -1,43 +1,37 @@
+"""Build SWMI feature matrices on a shared 1-minute UTC grid.
+
+This module intentionally implements only the current P0 feature surface. It
+preserves source identity, quality, missingness, and station/context columns so
+the larger feature catalog in ``docs/research/potential_features.md`` can be
+added later without changing upstream datasets.
 """
-build_feature_matrix.py
-Assembles the full feature matrix by lazily joining OMNI, GOES, Swarm LEO
-index, and SuperMAG onto a shared 1-minute UTC grid using Dask DataFrames.
 
-Computes:
-  - Newell coupling parameter (phi) via src/newell_coupling.py
-  - Rolling 10/30-minute mean and std for key L1 features
-  - Cyclical encodings for UT hour and day-of-year
-  - Gap missingness flags
-
-Output path convention:
-    data/processed/features/YYYY/MM/features_YYYYMM.parquet
-
-Scientific invariants
----------------------
-- No future data in features. All rolling windows use past-only history.
-- Cyclical features (ut_sin, ut_cos, doy_sin, doy_cos) are excluded from
-  Z-score scaling (they are already in [-1, 1]).
-- GOES data is already GSM; no coordinate rotation applied.
-- OMNI data is already bow-shock-propagated; no time-shifting applied.
-
-TODO: Add GOES X-ray precursor features; add multi-station target columns; integrate into scripts/02_build_features.py
-"""
+from __future__ import annotations
 
 import os
-import sys
-import datetime
+from typing import Iterable
+
+import dask.dataframe as dd
 import numpy as np
 import pandas as pd
-import dask.dataframe as dd
 from dask.distributed import Client, LocalCluster
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-import config
-from logger import get_logger
-from schema import validate_output_schema
-from newell_coupling import compute_newell_numpy
+from swmi.features.newell_coupling import compute_newell_numpy
+from swmi.preprocessing.validation import validate_output_schema
+from swmi.utils import config
+from swmi.utils.logger import get_logger, install_dask_worker_file_logging
 
 log = get_logger(__name__)
+
+FEATURE_SCHEMA_VERSION = "feature_schema_v1"
+GOES_MAG_ROLLING_WINDOWS_MIN = (60, 120)
+GOES_MAG_ROLLING_STATS = ("mean", "std", "min", "max")
+XRS_C_THRESHOLD = 1e-6
+XRS_M_THRESHOLD = 1e-5
+XRS_X_THRESHOLD = 1e-4
+SUPERMAG_TARGET_COLUMN = "dbdt_horizontal_magnitude"
+SUPERMAG_TARGET_ALIASES = (SUPERMAG_TARGET_COLUMN, "dbdt_magnitude")
+SUPERMAG_CONTEXT_COLUMNS = ("mlt", "mlat", "mlon", "glat", "glon")
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +115,146 @@ def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
+def _require_timestamp(df: pd.DataFrame) -> pd.DataFrame:
+    if "timestamp" not in df.columns:
+        raise KeyError("feature input is missing required 'timestamp' column")
+    out = df.copy()
+    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    if out["timestamp"].isna().any():
+        raise ValueError("feature input contains null or unparseable timestamps")
+    return out.sort_values("timestamp").reset_index(drop=True)
+
+
+def _rolling_stat(series: pd.Series, window_min: int, stat: str, min_valid: int) -> pd.Series:
+    rolling = series.rolling(window=window_min, min_periods=1)
+    valid_count = rolling.count()
+    if stat == "mean":
+        values = rolling.mean()
+    elif stat == "std":
+        values = rolling.std()
+    elif stat == "min":
+        values = rolling.min()
+    elif stat == "max":
+        values = rolling.max()
+    else:
+        raise ValueError(f"Unsupported rolling statistic: {stat}")
+    return values.where(valid_count >= min_valid)
+
+
+def add_goes_features(
+    df: pd.DataFrame,
+    *,
+    windows_min: Iterable[int] = GOES_MAG_ROLLING_WINDOWS_MIN,
+    statistics: Iterable[str] = GOES_MAG_ROLLING_STATS,
+    min_valid_fraction: float | None = None,
+) -> pd.DataFrame:
+    """Add scoped GEO GOES magnetometer state features.
+
+    This is intentionally narrow for P0-D2: it uses canonical ``goes_bz_gsm``,
+    emits past-only rolling state summaries, and preserves source/quality fields
+    such as ``goes_source_satellite`` for future multi-satellite and MLT features.
+    """
+    out = _require_timestamp(df)
+    if "goes_bz_gsm" not in out.columns:
+        raise KeyError("add_goes_features requires canonical column 'goes_bz_gsm'")
+
+    min_frac = config.ROLLING_MIN_VALID_FRAC if min_valid_fraction is None else min_valid_fraction
+    if not 0 < min_frac <= 1:
+        raise ValueError(f"min_valid_fraction must be in (0, 1], got {min_frac}")
+
+    if "goes_mag_missing_flag" not in out.columns:
+        out["goes_mag_missing_flag"] = out["goes_bz_gsm"].isna().astype("int8")
+    else:
+        out["goes_mag_missing_flag"] = out["goes_mag_missing_flag"].fillna(
+            out["goes_bz_gsm"].isna().astype("int8")
+        ).astype("int8")
+
+    out["goes_bz_gsm_missing"] = out["goes_bz_gsm"].isna().astype("int8")
+
+    for window in windows_min:
+        min_valid = max(1, int(np.ceil(window * min_frac)))
+        valid_count = out["goes_bz_gsm"].rolling(window=window, min_periods=1).count()
+        out[f"goes_bz_gsm_valid_points_{window}m"] = valid_count.astype("float32")
+        for stat in statistics:
+            out[f"goes_bz_gsm_{stat}_{window}m"] = _rolling_stat(
+                out["goes_bz_gsm"],
+                int(window),
+                stat,
+                min_valid,
+            )
+
+    return out
+
+
+def _select_xray_long_log(out: pd.DataFrame) -> pd.Series:
+    if "goes_xray_long_normalized" in out.columns:
+        return pd.to_numeric(out["goes_xray_long_normalized"], errors="coerce")
+    if "goes_xray_long_log" in out.columns:
+        return pd.to_numeric(out["goes_xray_long_log"], errors="coerce")
+    if "xrsb_flux" in out.columns:
+        flux = pd.to_numeric(out["xrsb_flux"], errors="coerce")
+        return np.log10(flux.where(flux > 0))
+    raise KeyError(
+        "add_xray_features requires one of 'goes_xray_long_normalized', "
+        "'goes_xray_long_log', or 'xrsb_flux'"
+    )
+
+
+def _time_since_last_event_minutes(timestamps: pd.Series, event_mask: pd.Series) -> pd.Series:
+    last_event_ts = pd.Series(pd.NaT, index=timestamps.index, dtype="datetime64[ns, UTC]")
+    last_event_ts.loc[event_mask.fillna(False)] = timestamps.loc[event_mask.fillna(False)]
+    last_event_ts = last_event_ts.ffill()
+    return (timestamps - last_event_ts).dt.total_seconds() / 60.0
+
+
+def add_xray_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add event-driven GOES X-ray precursor features for P0-G4.
+
+    X-ray is treated as a solar precursor. This function deliberately avoids
+    generic rolling windows and preserves raw/normalized XRS columns plus
+    ``xray_quality_flags`` and ``xray_source_satellite`` for future flare,
+    active-region, and cross-dataset interaction features.
+    """
+    out = _require_timestamp(df)
+    long_log = _select_xray_long_log(out)
+    out["goes_xray_long_log"] = long_log
+
+    dt_min = out["timestamp"].diff().dt.total_seconds() / 60.0
+    out["goes_xray_long_dlog_dt"] = long_log.diff() / dt_min
+    out.loc[dt_min <= 0, "goes_xray_long_dlog_dt"] = np.nan
+
+    if "xray_missing_flag" not in out.columns:
+        source_flux_missing = long_log.isna()
+        out["xray_missing_flag"] = source_flux_missing.astype("int8")
+    else:
+        out["xray_missing_flag"] = out["xray_missing_flag"].fillna(long_log.isna()).astype("int8")
+
+    c_event = long_log >= np.log10(XRS_C_THRESHOLD)
+    m_event = long_log >= np.log10(XRS_M_THRESHOLD)
+    x_event = long_log >= np.log10(XRS_X_THRESHOLD)
+
+    out["goes_xray_time_since_last_c_flare"] = _time_since_last_event_minutes(out["timestamp"], c_event)
+    out["goes_xray_time_since_last_m_flare"] = _time_since_last_event_minutes(out["timestamp"], m_event)
+    out["goes_xray_time_since_last_x_flare"] = _time_since_last_event_minutes(out["timestamp"], x_event)
+
+    # Event-driven 24h accumulators, not arbitrary rolling statistics.
+    out["goes_xray_cumulative_m_class_24h"] = (
+        m_event.astype("int8").rolling(window=24 * 60, min_periods=1).sum()
+    )
+    out["goes_xray_max_flux_24h"] = (
+        pd.to_numeric(out.get("xrsb_flux", 10**long_log), errors="coerce")
+        .rolling(window=24 * 60, min_periods=1)
+        .max()
+    )
+
+    return out
+
 def _add_gap_flags(df: pd.DataFrame) -> pd.DataFrame:
     """Binary flags for missing L1/GEO values."""
     df = df.copy()
     l1_cols = ["omni_bz_gsm", "omni_by_gsm", "omni_vx", "omni_proton_density", "omni_pressure"]
-    geo_cols = ["goes_bz_gsm"]
+    geo_cols = ["goes_bz_gsm", "goes_xray_long_log"]
     for c in l1_cols + geo_cols:
         if c in df.columns:
             df[f"{c}_missing"] = df[c].isna().astype("int8")
@@ -149,6 +278,14 @@ def _short_gap_fill(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _finalize_station_target_flags(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure station target flags are complete after joining to the master grid."""
+    df = df.copy()
+    for col in [c for c in df.columns if c.startswith("dbdt_missing_flag_")]:
+        df[col] = df[col].fillna(1).astype("int8")
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Per-partition transformation (for dask map_partitions)
 # ---------------------------------------------------------------------------
@@ -158,12 +295,22 @@ def _transform_partition(partition: pd.DataFrame) -> pd.DataFrame:
     partition = _add_cyclical_features(partition)
     partition = _add_newell_phi(partition)
     partition = _add_rolling_features(partition)
+    if "goes_bz_gsm" in partition.columns:
+        partition = add_goes_features(partition)
+    if (
+        "goes_xray_long_normalized" in partition.columns
+        or "goes_xray_long_log" in partition.columns
+        or "xrsb_flux" in partition.columns
+    ):
+        partition = add_xray_features(partition)
     partition = _add_gap_flags(partition)
     partition = _short_gap_fill(partition)
+    partition = _finalize_station_target_flags(partition)
 
     # Partition year/month columns for Parquet partitioning
     partition["year"]  = partition["timestamp"].dt.year.astype(int)
     partition["month"] = partition["timestamp"].dt.month.astype(int)
+    partition["feature_schema_version"] = FEATURE_SCHEMA_VERSION
 
     return partition
 
@@ -196,6 +343,73 @@ def _rename_leo(df: pd.DataFrame) -> pd.DataFrame:
     return df  # sub-index columns already canonical from compute_leo_index.py
 
 
+def _station_suffix(station: object) -> str:
+    """Return a stable IAGA station suffix for wide target columns."""
+    return str(station).strip().upper()
+
+
+def _prepare_supermag_targets(smag_df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot long-format SuperMAG targets into canonical multi-output columns.
+
+    Only the forecast target, its missingness flag, and SuperMAG-provided station
+    context are propagated. Raw NEZ components and instantaneous derivative
+    components stay out of the feature matrix to avoid target leakage.
+    """
+    target_source_col = next((col for col in SUPERMAG_TARGET_ALIASES if col in smag_df.columns), None)
+    required = {"timestamp", "station"}
+    missing = required - set(smag_df.columns)
+    if missing or target_source_col is None:
+        missing_list = sorted(missing)
+        if target_source_col is None:
+            missing_list.append(f"one of {list(SUPERMAG_TARGET_ALIASES)}")
+        raise KeyError(f"SuperMAG target input missing required columns: {missing_list}")
+
+    smag = smag_df.copy()
+    smag["timestamp"] = pd.to_datetime(smag["timestamp"], utc=True, errors="coerce")
+    if smag["timestamp"].isna().any():
+        raise ValueError("SuperMAG target input contains null or unparseable timestamps.")
+
+    smag["station"] = smag["station"].map(_station_suffix)
+    smag = smag.sort_values(["timestamp", "station"]).drop_duplicates(
+        subset=["timestamp", "station"],
+        keep="first",
+    )
+
+    target = pd.to_numeric(smag[target_source_col], errors="coerce")
+    if "dbdt_missing_flag" in smag.columns:
+        missing_flag = pd.to_numeric(smag["dbdt_missing_flag"], errors="coerce").fillna(0).astype("int8")
+    elif "dbdt_gap_flag" in smag.columns:
+        missing_flag = pd.to_numeric(smag["dbdt_gap_flag"], errors="coerce").fillna(0).astype("int8")
+    else:
+        missing_flag = pd.Series(0, index=smag.index, dtype="int8")
+
+    smag["dbdt_target_missing_flag"] = (target.isna() | (missing_flag.astype(bool))).astype("int8")
+    smag[SUPERMAG_TARGET_COLUMN] = target.where(smag["dbdt_target_missing_flag"] == 0)
+
+    pivot_values = [SUPERMAG_TARGET_COLUMN, "dbdt_target_missing_flag"]
+    pivot_values.extend(col for col in SUPERMAG_CONTEXT_COLUMNS if col in smag.columns)
+
+    wide = smag.pivot(index="timestamp", columns="station", values=pivot_values)
+    wide.columns = [
+        (
+            f"dbdt_missing_flag_{station}"
+            if value == "dbdt_target_missing_flag"
+            else f"{value}_{station}"
+        )
+        for value, station in wide.columns
+    ]
+    wide = wide.reset_index()
+
+    target_cols = [col for col in wide.columns if col.startswith(f"{SUPERMAG_TARGET_COLUMN}_")]
+    if not target_cols:
+        raise ValueError("SuperMAG target pivot produced no station target columns.")
+
+    for col in [c for c in wide.columns if c.startswith("dbdt_missing_flag_")]:
+        wide[col] = wide[col].fillna(1).astype("int8")
+
+    return wide.sort_values("timestamp").reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -226,8 +440,15 @@ def build_feature_matrix(year: int, month: int) -> None:
     omni_path = os.path.join(
         config.PROCESSED_DIR, "omni", f"{year:04d}", f"{month:02d}", f"omni_{month_str}.parquet"
     )
-    # GOES: take the first available satellite for this month
-    goes_dir = os.path.join(config.PROCESSED_DIR, "goes", f"{year:04d}", f"{month:02d}")
+    goes_mag_path = os.path.join(config.RAW_DATA_DIR, "goes", f"goes_mag_{month_str}.parquet")
+    goes_xray_norm_path = os.path.join(
+        config.PROCESSED_DIR,
+        "goes",
+        f"{year:04d}",
+        f"{month:02d}",
+        f"goes_xray_normalized_{month_str}.parquet",
+    )
+    goes_xray_raw_path = os.path.join(config.RAW_DATA_DIR, "goes", f"goes_xray_{month_str}.parquet")
     leo_path = os.path.join(
         config.PROCESSED_DIR, "swarm", f"{year:04d}", f"{month:02d}",
         f"swarm_leo_index_{month_str}.parquet",
@@ -246,6 +467,7 @@ def build_feature_matrix(year: int, month: int) -> None:
     # Start Dask cluster
     # ------------------------------------------------------------------
     cluster, client = _get_cluster()
+    install_dask_worker_file_logging(client)
 
     try:
         # --------------------------------------------------------------
@@ -256,13 +478,6 @@ def build_feature_matrix(year: int, month: int) -> None:
         omni_dd = dd.read_parquet(omni_path)
         leo_dd  = dd.read_parquet(leo_path)
         smag_dd = dd.read_parquet(smag_path)
-
-        # GOES: merge across all available satellite files for month
-        goes_files = [
-            os.path.join(goes_dir, f)
-            for f in os.listdir(goes_dir)
-            if f.startswith("goes") and f.endswith(".parquet")
-        ] if os.path.isdir(goes_dir) else []
 
         # Build a master 1-minute grid for this month
         start_ts = pd.Timestamp(year, month, 1, tz="UTC")
@@ -284,40 +499,47 @@ def build_feature_matrix(year: int, month: int) -> None:
         log.info("Joining OMNI onto master grid for %s...", month_str)
         joined_dd = grid_dd.merge(omni_dd, on="timestamp", how="left")
 
-        if goes_files:
-            log.info("Joining GOES (%d files) for %s...", len(goes_files), month_str)
-            goes_pds = []
-            for gf in sorted(goes_files):
-                try:
-                    goes_pds.append(pd.read_parquet(gf))
-                except Exception as exc:
-                    log.warning("Could not read GOES file %s: %s", gf, exc)
-            if goes_pds:
-                goes_pd = pd.concat(goes_pds, ignore_index=True)
-                goes_pd = goes_pd.drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
-                goes_dd_inner = dd.from_pandas(goes_pd, npartitions=4)
-                joined_dd = joined_dd.merge(goes_dd_inner, on="timestamp", how="left")
+        if os.path.exists(goes_mag_path):
+            log.info("Joining canonical GOES magnetometer for %s...", month_str)
+            goes_mag_pd = _rename_goes(pd.read_parquet(goes_mag_path))
+            goes_mag_pd["timestamp"] = pd.to_datetime(goes_mag_pd["timestamp"], utc=True)
+            goes_mag_dd = dd.from_pandas(goes_mag_pd.sort_values("timestamp"), npartitions=4)
+            joined_dd = joined_dd.merge(goes_mag_dd, on="timestamp", how="left")
         else:
-            log.warning("No GOES files found for %s. GOES columns will be absent.", month_str)
+            log.warning("No canonical GOES magnetometer file found for %s: %s", month_str, goes_mag_path)
+
+        xray_path = goes_xray_norm_path if os.path.exists(goes_xray_norm_path) else goes_xray_raw_path
+        if os.path.exists(xray_path):
+            log.info("Joining GOES X-ray for %s: %s", month_str, xray_path)
+            xray_pd = pd.read_parquet(xray_path)
+            xray_pd["timestamp"] = pd.to_datetime(xray_pd["timestamp"], utc=True)
+            xray_dd = dd.from_pandas(xray_pd.sort_values("timestamp"), npartitions=4)
+            joined_dd = joined_dd.merge(xray_dd, on="timestamp", how="left")
+        else:
+            log.warning("No GOES X-ray file found for %s. X-ray columns will be absent.", month_str)
 
         log.info("Joining LEO index for %s...", month_str)
         joined_dd = joined_dd.merge(leo_dd, on="timestamp", how="left")
 
-        # SuperMAG is long-format (station × minute). Pivot before joining
-        # so each station's dbdt_magnitude becomes a separate column.
+        # SuperMAG targets are long-format (station x minute). Pivot into
+        # canonical multi-output columns while preserving station context.
         log.info("Pivoting SuperMAG and joining for %s...", month_str)
         smag_pd = smag_dd.compute()
         if not smag_pd.empty and "station" in smag_pd.columns:
-            smag_pivot = smag_pd.pivot_table(
-                index="timestamp",
-                columns="station",
-                values=["b_n", "b_e", "b_z", "dbn_dt", "dbe_dt", "dbdt_magnitude", "dbdt_missing_flag"],
-                aggfunc="first",
+            smag_pivot = _prepare_supermag_targets(smag_pd)
+            target_cols = [
+                col for col in smag_pivot.columns
+                if col.startswith(f"{SUPERMAG_TARGET_COLUMN}_")
+            ]
+            log.info(
+                "Prepared %d station dB/dt target columns for %s.",
+                len(target_cols),
+                month_str,
             )
-            smag_pivot.columns = [f"{stat}_{col.lower()}" for col, stat in smag_pivot.columns]
-            smag_pivot = smag_pivot.reset_index()
             smag_dd_pivoted = dd.from_pandas(smag_pivot, npartitions=4)
             joined_dd = joined_dd.merge(smag_dd_pivoted, on="timestamp", how="left")
+        else:
+            raise ValueError(f"SuperMAG target file for {month_str} is empty or missing 'station'.")
 
         # --------------------------------------------------------------
         # Feature engineering via map_partitions (keeps computation lazy)

@@ -11,15 +11,13 @@ TODO: Refactor to class-based retriever; integrate into scripts/01_download_data
 """
 
 import os
-import sys
 import datetime
 import pandas as pd
 from viresclient import SwarmRequest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-import config
-from logger import get_logger
-from schema import validate_output_schema
+from swmi.preprocessing.validation import validate_output_schema
+from swmi.utils import config
+from swmi.utils.logger import get_logger
 
 log = get_logger(__name__)
 

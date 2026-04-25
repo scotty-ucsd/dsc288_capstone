@@ -1,1 +1,192 @@
-# Date ranges, station lists (dynamic), satellite configs, GOES operational periods
+# ============================================================================
+# Data Retrieval Configuration
+# ============================================================================
+# Controls: date ranges, satellite routing, station settings, API parameters.
+# Scientific invariants in feature_engineering.yaml — do not duplicate here.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Master cadence — all sources resampled/aligned to this interval.
+# Changing this requires full re-ingestion of all raw data.
+# ---------------------------------------------------------------------------
+master_cadence: "1min"
+
+# ---------------------------------------------------------------------------
+# Study period boundaries
+# Buffer prevents storm-recovery autocorrelation from crossing split seams.
+# ---------------------------------------------------------------------------
+date_ranges:
+  train:
+    start: "2015-01-01"
+    end: "2021-12-31"
+  validation:
+    start: "2022-01-01"
+    end: "2022-12-31"
+  test:
+    start: "2023-01-01"
+    end: "2023-12-31"
+
+# ---------------------------------------------------------------------------
+# GOES satellite configuration
+# Primary/backup priority determines deterministic merge order.
+# Legacy (<=GOES-15): NetCDF from NCEI, 2006–2020
+# Modern (>=GOES-16): netCDF4 from NGDC, 2016–present
+# ---------------------------------------------------------------------------
+goes:
+  legacy_satellites: [13, 14, 15]
+  modern_satellites: [16, 17, 18, 19]
+  legacy_cutoff_year: 2016  # year >= this uses modern parser
+
+  # Per-year primary satellite priority (deterministic merge).
+  # First satellite listed is primary; remaining are backups in order.
+  # 2015–2024: continuous L1/GEO coverage via GOES-R + legacy overlap where configured.
+  satellite_priority:
+    2015: ["GOES-15", "GOES-13"]
+    2016: ["GOES-15", "GOES-13"]
+    2017: ["GOES-16", "GOES-15"]
+    2018: ["GOES-16", "GOES-15"]
+    2019: ["GOES-16", "GOES-17"]
+    2020: ["GOES-16", "GOES-17"]
+    2021: ["GOES-16", "GOES-17"]
+    2022: ["GOES-16", "GOES-18"]
+    2023: ["GOES-16", "GOES-18"]
+    2024: ["GOES-16", "GOES-19", "GOES-18"]
+
+  operational_periods:
+    - satellite: "GOES-13"
+      start_date: "2006-08-01"
+      end_date: "2018-01-08"
+      primary_coverage_years: []
+      data_quality_notes: "Legacy magnetometer/XRS source; backup for 2015-2017 overlap."
+
+    - satellite: "GOES-14"
+      start_date: "2009-12-01"
+      end_date: "2020-03-04"
+      primary_coverage_years: []
+      data_quality_notes: "Legacy backup/storage satellite; use only if priority table includes it."
+
+    - satellite: "GOES-15"
+      start_date: "2010-09-01"
+      end_date: "2020-03-02"
+      primary_coverage_years: [2015, 2016]
+      data_quality_notes: "Legacy primary for 2015-2016; backup during GOES-16 transition."
+
+    - satellite: "GOES-16"
+      start_date: "2016-11-04"
+      end_date: "2024-12-31"
+      primary_coverage_years: [2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
+      data_quality_notes: "GOES-East operational anchor; 2017-2024 primary for overlap study; XRS uses modern flag filtering."
+
+    - satellite: "GOES-17"
+      start_date: "2018-02-12"
+      end_date: "2023-01-04"
+      primary_coverage_years: []
+      data_quality_notes: "Modern backup for 2019-2021; known ABI thermal issue does not define XRS/mag exclusion."
+
+    - satellite: "GOES-18"
+      start_date: "2022-08-01"
+      end_date: "2024-12-31"
+      primary_coverage_years: [2022, 2023, 2024]
+      data_quality_notes: "GOES-West; backup and transition coverage with GOES-19 activation in 2024."
+
+    - satellite: "GOES-19"
+      start_date: "2024-06-25"
+      end_date: "2024-12-31"
+      primary_coverage_years: [2024]
+      data_quality_notes: "GOES-U / GOES-19 launch 2024-06-25; East/West test phase then operational. Included for 2015-2024 pipeline extension. Same NGDC mag/XRS L2 products as GOES-16+; use modern quality rules."
+
+# ---------------------------------------------------------------------------
+# OMNI (L1 solar wind) configuration
+# ---------------------------------------------------------------------------
+omni:
+  dataset_id: "OMNI_HRO2_1MIN"
+  variables:
+    - "BX_GSE"          # IMF Bx in GSE
+    - "BY_GSM"          # IMF By in GSM
+    - "BZ_GSM"          # IMF Bz in GSM
+    - "F"               # IMF magnitude (Bt)
+    - "Vx"              # Solar wind speed
+    - "proton_density"  # Np
+    - "Pressure"        # Dynamic pressure
+    - "SYM_H"           # SYM-H index
+    - "AL_INDEX"        # AL index
+    - "AU_INDEX"        # AU index
+  fill_threshold: 9000.0  # Values above this are OMNI missing-data sentinels
+
+# ---------------------------------------------------------------------------
+# Swarm (LEO) configuration
+# ---------------------------------------------------------------------------
+swarm:
+  satellites: ["A", "B", "C"]
+  collection_template: "SW_OPER_MAG{sat}_LR_1B"
+  variables:
+    - "B_NEC"
+    - "F"
+    - "QDLat"
+    - "QDLon"
+    - "MLT"
+    - "Latitude"
+    - "Longitude"
+    - "Radius"
+    - "Flags_B"
+
+# ---------------------------------------------------------------------------
+# SuperMAG (Ground) configuration
+# ---------------------------------------------------------------------------
+supermag:
+  api_base: "https://supermag.jhuapl.edu/services/data-api.php"
+  # Station list is DYNAMIC — retrieved via SuperMAGGetInventory per month.
+  # No hard-coded station lists. (Warning #19)
+  # API flags: NEZ components + mlt,mag,geo for station context metadata.
+  api_flags: "mlt,mag,geo"
+  completeness_warn_threshold: 0.80  # warn if station < 80% data
+  fill_value_threshold: 90000.0       # SuperMAG physical fill value sentinel
+
+# ---------------------------------------------------------------------------
+# Reference field model
+# IGRF via ppigrf is the default; CHAOS requires coefficient file.
+# ---------------------------------------------------------------------------
+reference_field: "IGRF"  # options: "IGRF", "CHAOS"
+
+# ---------------------------------------------------------------------------
+# Directory layout
+# Aligned with scripts/utils/setup_directories.py and swmi.utils.config.
+# raw/{omni,goes,swarm,supermag}: source-specific subdirs under data/raw
+# ---------------------------------------------------------------------------
+directories:
+  raw: "data/raw"
+  raw_omni: "data/raw/omni"
+  raw_goes: "data/raw/goes"
+  raw_goes_legacy: "data/raw/goes/legacy"
+  raw_goes_modern: "data/raw/goes/modern"
+  raw_swarm: "data/raw/swarm"
+  raw_supermag: "data/raw/supermag"
+  interim: "data/interim"
+  interim_cleaned: "data/interim/cleaned"
+  processed: "data/processed"
+  processed_omni: "data/processed/omni"
+  processed_goes: "data/processed/goes"
+  processed_swarm: "data/processed/swarm"
+  processed_supermag: "data/processed/supermag"
+  processed_aligned_1min: "data/processed/aligned_1min"
+  processed_features: "data/processed/features"
+  processed_sequences: "data/processed/sequences"   # optional monthly X/y staging
+  features: "data/processed/features"              # same as processed_features; training inputs
+  sequences: "data/sequences"                      # final train/val/test NPZ splits
+  models: "models"
+  logs: "logs"
+  artifacts: "models/artifacts"
+  dask_temp: "data/tmp"
+  station_metadata: "data/external/station_metadata"
+
+# ---------------------------------------------------------------------------
+# Gap interpolation policy
+# Short gaps in smooth L1/GEO variables may be linearly interpolated.
+# NEVER interpolate: targets, LEO indices, dB/dt values.
+# ---------------------------------------------------------------------------
+max_interp_gap_min: 5
+
+# ---------------------------------------------------------------------------
+# Minimum completeness threshold
+# ---------------------------------------------------------------------------
+min_completeness_threshold: 0.50
