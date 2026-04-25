@@ -37,6 +37,7 @@ _DATA_SUBDIRS = (
     "sequences/train",
     "sequences/val",
     "sequences/test",
+    "fused",
     "tmp",
 )
 

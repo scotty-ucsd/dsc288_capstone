@@ -1,0 +1,317 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+
+\title{Milestone 2: First Progress Report\\\large Physics-Informed Forecasting of Regional Geomagnetic Perturbations ($|dB/dt|$)}
+\author{Scotty Rogers}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+% SECTION 1: BACKGROUND & PROBLEM STATEMENT (Rubric: Problem Statement)
+% ============================================================
+\section{Background and Problem Statement}
+\label{sec:background}
+
+\subsection{Why This Problem Matters}
+Coronal mass ejections (CMEs) and high-speed solar wind streams drive magnetospheric deformations that generate geomagnetically induced currents (GICs), threatening power grid stability. The March 1989 Quebec blackout demonstrated the economic and operational consequences. Current operational forecasts rely on global indices ($Kp$, $Dst$) that do not resolve regional ground-level magnetic perturbations. Forecasting $|dB/dt|$---the rate of change of the geomagnetic field---provides a direct proxy for GIC hazard, but it is spatially structured, temporally intermittent, and driven by a nonlinear Sun-to-ground causal chain spanning solar eruptions, L1 solar wind, magnetospheric state, and ionospheric currents.
+
+\subsection{Precise Prediction Setup}
+\textbf{Task:} Binary classification per target station. \\
+\textbf{Input:} A fixed-width feature vector at time $t$ constructed from five observation layers (Solar / L1 / GEO / LEO / Ground), including physics-informed engineered features. \\
+\textbf{Output:} A calibrated probability that $|dB/dt|$ exceeds a regionally calibrated threshold $\tau$ at \textbf{one specific target SuperMAG station} (ABK, BJN, or TRO) within the next 60 minutes, plus a binary alert at the HSS-optimal threshold. \\
+\textbf{Modeling mode:} A \textbf{separate classifier is trained for each target station}; there is no joint multi-station model. This choice is motivated by the spatial heterogeneity of high-latitude ground perturbations and follows the station-specific gray-box approach of Camporeale et al. (2020).
+
+% ============================================================
+% SECTION 2: DATASET IDENTIFICATION & CITATION
+% ============================================================
+\section{Dataset Identification and Citation}
+\label{sec:dataset}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Layer} & \textbf{Source} & \textbf{Provider / DOI} & \textbf{Cadence} \\
+\midrule
+Solar & GOES X-ray Flux (XRS) & NOAA NCEI \cite{noaa_goes} & 1-minute \\
+L1 & OMNI Solar Wind \& IMF & NASA CDAWeb \cite{omni} & 1-minute \\
+GEO & GOES Magnetometer (GMAG) & NOAA NCEI \cite{noaa_goes} & 1-minute \\
+LEO & Swarm EFI \& FAC proxies & ESA Swarm SDDS \cite{swarm} & 1-minute (orbital) \\
+Ground & SuperMAG magnetometers & SuperMAG / JHU APL \cite{supermag} & 1-minute \\
+\bottomrule
+\end{tabular}
+\caption{Fused dataset: five observation layers, January 2015 -- December 2024 (120 months, 118 successfully processed).}
+\end{table}
+
+\textbf{Ground truth:} SuperMAG provides labeled $|dB/dt|$ magnitude and binary threshold-exceedance flags per station, enabling supervised learning. The dataset spans the declining phase of Solar Cycle 24 and the rising phase of Cycle 25, mitigating quiet-time bias.
+
+% ============================================================
+% SECTION 3: DATA PIPELINE (Rubric: Data Pipeline -- merge, cleanse, augment, normalize)
+% ============================================================
+\section{Data Pipeline}
+\label{sec:pipeline}
+
+\subsection{Purpose}
+The pipeline fuses $\sim$100 GB of raw multisponsor, multimodal satellite and ground data into a single ML-ready feature matrix of 5.17 million rows $\times$ 90 features at 1-minute cadence. It is implemented in \textbf{PySpark} for distributed processing and is modular enough to accommodate additional satellite constellations.
+
+\subsection{Pipeline Design and Details}
+\textbf{Stage 1 -- Retrieval:} Automated download scripts query each provider API (NOAA, CDAWeb, ESA Swarm SDDS, SuperMAG) and cache raw files in versioned directories. \\
+\textbf{Stage 2 -- Parsing \& Quality Flags:} Each source is parsed into canonical schemas. Missing-value and freshness flags are generated (e.g., \texttt{goes\_mag\_missing\_flag}, \texttt{leo\_coverage\_flag}) so the model can condition on data quality rather than treating imputed values as fully observed. \\
+\textbf{Stage 3 -- Temporal Alignment:} All layers are resampled to a unified 1-minute UTC grid using nearest-valid interpolation with maximum gap tolerances (e.g., 5 minutes for GOES, 90 minutes for Swarm orbital gaps). \\
+\textbf{Stage 4 -- Feature Engineering:} Physics-informed features (Newell coupling, rolling IMF statistics, cyclical time encodings) and lagged ground-state variables are computed inline. \\
+\textbf{Stage 5 -- Merge:} A left-join on the master time index produces the fused feature matrix, with per-source provenance columns retained for debugging.
+
+\subsection{Data Cleansing}
+\begin{itemize}[nosep]
+    \item \textbf{NULL / missing values:} Handled via source-specific imputation (forward-fill for GOES/OMNI; zero-fill with coverage flag for Swarm gaps) and explicit missingness indicators.
+    \item \textbf{Date formats:} All timestamps are converted to UTC \texttt{datetime64[ns]} at ingestion; no timezone ambiguity remains in the merged matrix.
+    \item \textbf{Outlier clipping:} Extreme physical outliers (e.g., $|B_z| > 100$ nT) are flagged and Winsorized at the 99.9th percentile rather than removed, preserving rare storm events.
+\end{itemize}
+
+\subsection{Data Augmentation / Enrichment}
+\begin{itemize}[nosep]
+    \item \textbf{Newell coupling function} $\Phi = V^{4/3} |B_T \sin^3(\theta/2)|$: instantaneous and rolling (10-min, 30-min) forms encode solar wind--magnetosphere coupling efficiency \cite{camporeale2020}.
+    \item \textbf{Rolling IMF statistics:} 10-minute and 30-minute rolling means and standard deviations of $B_z$ and $V_x$ capture sustained southward excursions.
+    \item \textbf{Cyclical encodings:} Sine/cosine pairs for UT and day-of-year represent diurnal and seasonal ionospheric conductance structure without ordinal leakage.
+    \item \textbf{Station-specific lagged $|dB/dt|$:} 5-minute, 15-minute, and 60-minute lags provide short-memory persistence features.
+    \item \textbf{GOES magnetic rolling statistics:} 60-minute and 120-minute rolling mean/std/min/max of GOES $B_z$ (GSM) computed over valid points only.
+\end{itemize}
+
+\subsection{Data Normalization}
+All continuous input features are standardized to zero mean and unit variance using statistics computed \textbf{only on the training split} (2015--2022). Categorical / flag features remain unscaled. Target labels are binary (threshold exceedance) and require no normalization.
+
+\subsection{Pipeline Outputs}
+The final artifact is \texttt{feature\_matrix.parquet}: 5.17M rows $\times$ 90 columns, partitioned by year, with a deterministic train/validation/test split (train: 2015--2022; validation: 2023; test: 2024).
+
+% ============================================================
+% SECTION 4: EXPLORATORY DATA ANALYSIS (Rubric: EDA)
+% ============================================================
+\section{Exploratory Data Analysis (EDA)}
+\label{sec:eda}
+
+\subsection{Analysis Types Used}
+\begin{itemize}[nosep]
+    \item \textbf{Univariate:} Distribution plots, missingness bar charts, freshness timelines.
+    \item \textbf{Multivariate:} Correlation heatmaps (Pearson and Spearman), cross-layer lag correlation.
+    \item \textbf{Graphical:} Time-series overlays of solar wind drivers against ground $|dB/dt|$ events; seasonal stacked bar charts of event rates.
+    \item \textbf{Non-graphical:} Summary tables of missingness rates, event rates per station, and feature variance inflation factors (VIF).
+\end{itemize}
+
+\subsection{Data Completeness, Freshness, and Quality}
+\begin{itemize}[nosep]
+    \item \textbf{GOES X-ray \& magnetometer:} $>$99\% completeness; gaps $<$5 minutes are forward-filled, longer gaps flagged.
+    \item \textbf{OMNI:} $>$98\% completeness after linear interpolation of short L1 propagation gaps.
+    \item \textbf{Swarm LEO:} $\sim$60\% coverage due to orbital geometry; handled via zero-fill + coverage flag rather than interpolation to avoid fictitious continuity.
+    \item \textbf{SuperMAG:} $>$99\% completeness for ABK, BJN, TRO; no significant data loss.
+\end{itemize}
+\textit{Artifacts:} Missingness bar chart per source layer; freshness timeline plot showing effective coverage by month.
+
+\subsection{Variable Distributions}
+\begin{itemize}[nosep]
+    \item $|dB/dt|$ is heavily right-skewed (log-normal-like); threshold exceedances constitute $\sim$2--4\% of minutes per station, confirming strong class imbalance.
+    \item Solar wind $V_x$ and $B_z$ are approximately Gaussian with heavy tails during storm intervals.
+    \item Newell coupling $\Phi$ spans several orders of magnitude; log-transform stabilizes variance.
+\end{itemize}
+\textit{Artifacts:} Histograms with log-scaled y-axes for key drivers; QQ plots for normality assessment.
+
+\subsection{Anomalies and Outliers}
+\begin{itemize}[nosep]
+    \item Extreme $|dB/dt|$ spikes ($>$10 nT/s) coincide with documented substorm onsets and are retained as true positives.
+    \item OMNI $B_z$ outliers $>$100 nT are Winsorized; these are instrument artifacts, not physical.
+    \item Swarm electron flux shows occasional single-orbit spikes; these are preserved with a quality flag for model conditioning.
+\end{itemize}
+\textit{Artifacts:} Box plots per feature group; outlier flag summary table.
+
+\subsection{Relationships and Correlations}
+\begin{itemize}[nosep]
+    \item Strong positive correlation ($r \approx 0.55$) between 30-minute rolling $\Phi$ and future 60-minute $|dB/dt|$ exceedance at ABK, supporting the physical relevance of the Newell coupling feature.
+    \item Lagged ground $|dB/dt|$ (5-min lag) shows autocorrelation $\rho \approx 0.42$, justifying the persistence baseline.
+    \item GOES $B_z$ (GEO) and OMNI $B_z$ (L1) are moderately correlated ($r \approx 0.60$) with $\sim$20-minute lag, consistent with solar wind propagation time.
+\end{itemize}
+\textit{Artifacts:} Correlation heatmap (Figure~\ref{fig:corr}); lag-correlation ribbon plot for L1-to-ground propagation.
+
+% ============================================================
+% SECTION 5: FEATURE ENGINEERING (Rubric: Feature Identification from EDA)
+% ============================================================
+\section{Feature Engineering}
+\label{sec:features}
+
+\subsection{Literature-Derived Features}
+All features below are drawn directly from prior work and justified by physical or empirical precedent:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}p{4.5cm}p{6cm}l@{}}
+\toprule
+\textbf{Feature} & \textbf{Physical Justification} & \textbf{Source} \\
+\midrule
+Newell coupling $\Phi$ (inst., 10-min, 30-min roll) & Magnetic reconnection efficiency; strongest known solar wind--magnetosphere coupling proxy & \cite{camporeale2020} \\
+Rolling IMF $B_z$ mean / std (10-min, 30-min) & Sustained southward field drives substorm growth phase & \cite{camporeale2020, chen2025} \\
+Lagged ground $|dB/dt|$ (5-min, 15-min, 60-min) & Short-memory persistence; gray-box baseline enhancement & \cite{camporeale2020} \\
+Cyclical UT / DOY sine-cosine pairs & Diurnal and seasonal ionospheric conductance modulation & \cite{camporeale2020, billcliff2026} \\
+GOES $B_z$ rolling stats (60-min, 120-min) & Geostationary field as magnetospheric state proxy & \cite{camporeale2020} \\
+\bottomrule
+\end{tabular}
+\caption{Literature-derived features with physical justification and citations.}
+\end{table}
+
+\subsection{Novel / EDA-Derived Features}
+Features added based on EDA insights not explicitly listed in prior work:
+
+\begin{itemize}[nosep]
+    \item \textbf{GOES magnetic missing flag + valid-point count:} EDA showed that GOES magnetometer gaps cluster during spacecraft maneuvers. A binary flag and a rolling count of valid points in the 60-minute window allow the model to discount statistics computed over sparse intervals.
+    \item \textbf{Swarm LEO coverage flag by MLT zone:} Swarm orbital coverage is non-uniform in magnetic local time. EDA revealed that FAC proxies from certain MLT sectors carry stronger predictive signal during substorm onset. A per-zone coverage flag lets the model weight or ignore inputs conditionally.
+    \item \textbf{Solar wind dynamic pressure $P_{dyn}$ and its 30-minute trend:} EDA correlation analysis showed $P_{dyn}$ spikes precede $|dB/dt|$ enhancements by 15--30 minutes at high latitudes, suggesting a compressional precursor signal.
+\end{itemize}
+
+\subsection{Feature Selection Strategy}
+A two-stage filter is applied: (1) VIF screening to remove collinear pairs ($\text{VIF} > 10$), and (2) mutual-information ranking against the 60-minute ahead label to retain the top 60 features for initial modeling. This reduces dimensionality while preserving the full physics-informed feature family.
+
+% ============================================================
+% SECTION 6: MODELS AND JUSTIFICATION (Rubric: Solution Approaches)
+% ============================================================
+\section{Models and Justification}
+\label{sec:models}
+
+Models are listed in order of implementation priority. The exact role of each model in the final evaluation is stated explicitly.
+
+\subsection{Priority 1: Baselines (Required Floor)}
+\begin{itemize}[nosep]
+    \item \textbf{Persistence:} Predict that the future label equals the most recent observed label (5-minute lag). This tests whether any model adds skill beyond short-term autocorrelation.
+    \item \textbf{Climatology:} Predict the unconditional training-set event rate for the target station. This tests whether any model beats trivial frequency knowledge.
+\end{itemize}
+\textit{Evaluation role:} Both baselines are mandatory comparisons. Any primary model that fails to exceed \textbf{both} on HSS and BSS is considered non-viable.
+
+\subsection{Priority 2: Logistic Regression (Linear Reference)}
+A regularized logistic regression (L2, $C$ tuned via validation HSS) on the full standardized feature matrix. \\
+\textit{Evaluation role:} Establishes the \textbf{linear ceiling}. If LightGBM does not substantially outperform logistic regression, the problem is likely dominated by linear driver-response relationships and the added complexity of tree boosting is unjustified. Coefficient-level interpretability is preserved for physical inspection.
+
+\subsection{Priority 3: LightGBM (Primary Model)}
+A gradient-boosting tree classifier with native handling of class imbalance (\texttt{is\_unbalance=True}) and missing values. Hyperparameters (learning rate, num\_leaves, min\_child\_samples) are tuned via time-series-aware cross-validation on the validation year (2023). SHAP values are computed for source-layer attribution. \\
+\textit{Evaluation role:} The \textbf{primary operational candidate}. It is compared against persistence, climatology, and logistic regression on HSS, BSS, ROC AUC, and calibration. A target of $\text{HSS} > 0.35$ and $\text{BSS} > 0.10$ relative to climatology defines project success.
+
+\subsection{Priority 4: LSTM (Secondary / Sequence Extension)}
+A unidirectional LSTM with 2 layers (128 hidden units, dropout 0.3) trained on sequences of length 60 (1-hour lookback) of the same input features. This tests the hypothesis that \textbf{explicit temporal memory} adds skill beyond LightGBM's engineered lag features. \\
+\textit{Evaluation role:} \textbf{Secondary comparison only}. If the LSTM outperforms LightGBM on the held-out 2024 test set, this supports the hypothesis that learned temporal structure is beneficial. If not, LightGBM remains the recommended operational model. The LSTM is \textbf{not} a replacement for the baselines or logistic regression; it is an additional ablation point in the model hierarchy.
+
+\subsection{Explicit Comparison Plan}
+The final Milestone 3 evaluation will report a single comparison table with rows for persistence, climatology, logistic regression, LightGBM, and LSTM, columns for HSS, BSS, ROC AUC, precision/recall at the HSS-optimal threshold, and expected calibration error (ECE). This directly addresses the Milestone 1 feedback that the comparison plan was insufficiently explicit.
+
+% ============================================================
+% SECTION 7: PROGRESS REPORT DETAILS (Rubric: Quality and Comprehensiveness)
+% ============================================================
+\section{Progress Report Details}
+\label{sec:progress}
+
+\subsection{Completed Work}
+\begin{itemize}[nosep]
+    \item \textbf{Data retrieval (P0-B2, P0-B3, P0-B4):} Automated GOES (all satellites), Swarm (all three spacecraft), and SuperMAG (all stations) retrieval pipelines.
+    \item \textbf{LEO index computation (P0-B5):} \texttt{compute\_leo\_index()} produces RC-index-style electron flux and FAC proxies by MLT zone.
+    \item \textbf{Feature matrix builder (P0-F1, P0-F2):} \texttt{build\_feature\_matrix()} and \texttt{validate\_feature\_matrix()} produce the 5.17M-row fused dataset.
+    \item \textbf{GOES magnetic features (P0-G4):} \texttt{add\_goes\_features()} adds rolling $B_z$ statistics with valid-point awareness.
+    \item \textbf{EDA artifacts:} Missingness plots, distribution histograms, correlation heatmaps, and lag-correlation ribbons generated for all five layers.
+\end{itemize}
+
+\subsection{In-Progress Work}
+\begin{itemize}[nosep]
+    \item VIF-based collinearity screening and mutual-information feature ranking.
+    \item Initial LightGBM baseline training on the 2015--2022 training split.
+    \item Persistence and climatology baseline implementations for HSS/BSS computation.
+\end{itemize}
+
+\subsection{Tests Run}
+\begin{itemize}[nosep]
+    \item \textbf{Data validation:} Schema compliance tests on 118 monthly partitions; zero schema violations.
+    \item \textbf{Physical sanity checks:} Correlation sign tests (e.g., southward $B_z$ positively correlated with future $|dB/dt|$); all signs match physical expectation.
+    \item \textbf{Leakage audit:} Confirmed that no future information (including target station $|dB/dt|$ beyond time $t$) enters the feature vector.
+\end{itemize}
+
+% ============================================================
+% SECTION 8: TASK LIST (Solo Project)
+% ============================================================
+\section{Task List}
+\label{sec:tasks}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}clll@{}}
+\toprule
+\textbf{ID} & \textbf{Task} & \textbf{Status} & \textbf{Target} \\
+\midrule
+P0-B2 & GOES data retrieval & Complete & Apr 2026 \\
+P0-B3 & Swarm data retrieval & Complete & Apr 2026 \\
+P0-B4 & SuperMAG retrieval & Complete & Apr 2026 \\
+P0-B5 & LEO index computation & Complete & Apr 2026 \\
+P0-F1 & Feature matrix build & Complete & Apr 2026 \\
+P0-F2 & Feature matrix validation & Complete & Apr 2026 \\
+P0-G4 & GOES magnetic features & Complete & Apr 2026 \\
+P0-E1 & EDA: missingness \& distributions & Complete & Apr 2026 \\
+P0-E2 & EDA: correlations \& lag analysis & Complete & Apr 2026 \\
+P1-M1 & LightGBM baseline training & In Progress & May 2026 \\
+P1-M2 & Logistic regression reference & In Progress & May 2026 \\
+P1-M3 & Persistence / climatology baselines & In Progress & May 2026 \\
+P1-M4 & LSTM sequence model & Planned & May 2026 \\
+P1-V1 & SHAP attribution analysis & Planned & May 2026 \\
+P1-V2 & Calibration \& reliability diagrams & Planned & May 2026 \\
+\bottomrule
+\end{tabular}
+\caption{Solo task list with status and target dates.}
+\end{table}
+
+% ============================================================
+% SECTION 9: RISKS AND MITIGATION
+% ============================================================
+\section{Risks and Mitigation}
+\label{sec:risks}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}p{4cm}p{5cm}p{4cm}@{}}
+\toprule
+\textbf{Risk} & \textbf{Impact} & \textbf{Mitigation} \\
+\midrule
+Swarm LEO coverage gaps ($\sim$40\% missing) reduce LEO signal strength & LEO features may be ignored by model; multimodal claim weakened & Coverage flags allow model to conditionally weight; if LEO adds no skill, scope reduces to Solar/L1/GEO/Ground with explicit justification \\
+Class imbalance ($\sim$2--4\% positive rate) leads to trivial high-accuracy, low-skill models & HSS/BSS near zero; model predicts majority class & LightGBM native imbalance handling; HSS-optimal threshold tuning; evaluation strictly on skill scores, not accuracy \\
+LSTM training time / memory exceeds SDSC allocation limits & Cannot complete sequence model comparison & Pre-allocated SDSC batch jobs; fallback to smaller LSTM (1 layer, 64 units) or GRU if needed \\
+Station heterogeneity (ABK vs. BJN vs. TRO) causes one model to fail & Single-station results dominate; other stations weak & Separate per-station training is already planned; if one station is systematically harder, this becomes a finding, not a failure \\
+\bottomrule
+\end{tabular}
+\caption{Risk register with mitigation strategies.}
+\end{table}
+
+% ============================================================
+% SECTION 10: REFERENCES
+% ============================================================
+\section{References}
+\label{sec:refs}
+
+\begin{enumerate}
+    \item Billcliff, N., et al. (2026). Extended lead-time geomagnetic storm forecasting with solar wind ensembles and machine learning. \textit{Space Weather}. \label{billcliff2026}
+    \item Camporeale, E., et al. (2020). A gray-box model for a probabilistic estimate of regional ground magnetic perturbations: enhancing the NOAA operational Geospace model with machine learning. \textit{JGR: Space Physics}. \label{camporeale2020}
+    \item Camporeale, E., et al. (2025). Verification of the NOAA SWPC solar flare forecast 1998--2024. \textit{Space Weather}. \label{camporeale2025}
+    \item Chen, S., et al. (2025). GeoDGP: One-hour ahead global probabilistic geomagnetic perturbation forecasting using deep Gaussian process. \textit{Space Weather}. \label{chen2025}
+    \item Sun, Z., et al. (2022). A review of Earth artificial intelligence. \textit{Computers \& Geosciences}. \label{sun2022}
+    \item NOAA NCEI. GOES Space Weather Data. \url{https://www.ncei.noaa.gov/data/goes-space-weather/} \label{noaa_goes}
+    \item NASA CDAWeb. OMNI High Resolution Data. \url{https://cdaweb.gsfc.nasa.gov/} \label{omni}
+    \item ESA Swarm Science Data System. \url{https://swarm-diss.eo.esa.int/} \label{swarm}
+    \item SuperMAG. Johns Hopkins APL / ISEE. \url{http://supermag.jhuapl.edu/} \label{supermag}
+\end{enumerate}
+
+\end{document}
