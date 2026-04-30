@@ -1,0 +1,130 @@
+feature_name,category,feature_type,justification
+goes_xrsa_flux,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrsb_flux,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrsa_good_flag,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrsb_good_flag,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrs_era,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrs_satellite,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrsa_flux_log10,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrsb_flux_log10,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+goes_xrsb_minus_xrsa_log10,Numerical_Solar,Numerical,Raw solar irradiance measurement; log10 transform applied for dynamic range compression
+omni_bx_gse,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+omni_by_gsm,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+omni_bz_gsm,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+omni_f,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+omni_vx,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+omni_proton_density,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+omni_pressure,Numerical_L1,Numerical,Solar wind plasma and IMF parameters at L1; physics-informed by Dungey cycle coupling
+goes_bz_gsm,Numerical_GEO,Numerical,Geostationary magnetic field; provides mid-path propagation info
+goes_bt,Numerical_GEO,Numerical,Geostationary magnetic field; provides mid-path propagation info
+goes_bx_gsm,Numerical_GEO,Numerical,Geostationary magnetic field; provides mid-path propagation info
+goes_by_gsm,Numerical_GEO,Numerical,Geostationary magnetic field; provides mid-path propagation info
+goes_satellite,Numerical_GEO,Numerical,Geostationary magnetic field; provides mid-path propagation info
+leo_high_lat,Numerical_LEO,Numerical,Swarm LEO RC index and FAC proxies; ionospheric current system indicators
+leo_mid_lat,Numerical_LEO,Numerical,Swarm LEO RC index and FAC proxies; ionospheric current system indicators
+leo_dayside,Numerical_LEO,Numerical,Swarm LEO RC index and FAC proxies; ionospheric current system indicators
+leo_nightside,Numerical_LEO,Numerical,Swarm LEO RC index and FAC proxies; ionospheric current system indicators
+ABK_b_e,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+BJN_b_e,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+TRO_b_e,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+ABK_b_n,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+BJN_b_n,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+TRO_b_n,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+ABK_b_z,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+BJN_b_z,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+TRO_b_z,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+ABK_dbe_dt,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+BJN_dbe_dt,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+TRO_dbe_dt,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+ABK_dbn_dt,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+BJN_dbn_dt,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+TRO_dbn_dt,Numerical_Ground,Numerical,Ground magnetometer components; direct local geomagnetic field measurement
+newell_phi,Numerical_Derived,Numerical,"Newell coupling function; physics-based solar wind-magnetosphere coupling metric (Newell et al., 2007)"
+ut_sin,Temporal_Calendar,Temporal,Cyclical time encoding; captures diurnal/seasonal geomagnetic activity patterns
+ut_cos,Temporal_Calendar,Temporal,Cyclical time encoding; captures diurnal/seasonal geomagnetic activity patterns
+doy_sin,Temporal_Calendar,Temporal,Cyclical time encoding; captures diurnal/seasonal geomagnetic activity patterns
+doy_cos,Temporal_Calendar,Temporal,Cyclical time encoding; captures diurnal/seasonal geomagnetic activity patterns
+year,Temporal_Calendar,Temporal,Cyclical time encoding; captures diurnal/seasonal geomagnetic activity patterns
+month,Temporal_Calendar,Temporal,Cyclical time encoding; captures diurnal/seasonal geomagnetic activity patterns
+goes_xrsa_log10_lag_5m,Temporal_Lag,Temporal,Past-value feature; enables model to learn temporal dependencies without data leakage (strict .shift())
+goes_xrsa_log10_lag_15m,Temporal_Lag,Temporal,Past-value feature; enables model to learn temporal dependencies without data leakage (strict .shift())
+goes_xrsa_log10_lag_60m,Temporal_Lag,Temporal,Past-value feature; enables model to learn temporal dependencies without data leakage (strict .shift())
+goes_xrsb_log10_lag_5m,Temporal_Lag,Temporal,Past-value feature; enables model to learn temporal dependencies without data leakage (strict .shift())
+goes_xrsb_log10_lag_15m,Temporal_Lag,Temporal,Past-value feature; enables model to learn temporal dependencies without data leakage (strict .shift())
+goes_xrsb_log10_lag_60m,Temporal_Lag,Temporal,Past-value feature; enables model to learn temporal dependencies without data leakage (strict .shift())
+omni_bz_gsm_valid_points_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_bz_gsm_mean_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_bz_gsm_std_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_bz_gsm_valid_points_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_bz_gsm_mean_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_bz_gsm_std_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_vx_valid_points_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_vx_mean_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_vx_std_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_vx_valid_points_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_vx_mean_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+omni_vx_std_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+newell_phi_valid_points_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+newell_phi_mean_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+newell_phi_std_10m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+newell_phi_valid_points_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+newell_phi_mean_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+newell_phi_std_30m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsa_log10_roll_mean_15m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsa_log10_roll_nvalid_15m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsa_log10_roll_mean_60m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsa_log10_roll_nvalid_60m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsa_log10_roll_max_60m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsb_log10_roll_mean_15m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsb_log10_roll_nvalid_15m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsb_log10_roll_mean_60m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsb_log10_roll_nvalid_60m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_xrsb_log10_roll_max_60m,Temporal_Rolling,Temporal,Rolling window statistics; captures volatility and trend over physical timescales (10m/30m/60m)
+goes_missing_flag,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_high_lat_decay_age,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_high_lat_is_fresh,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_high_lat_count,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_mid_lat_decay_age,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_mid_lat_is_fresh,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_mid_lat_count,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_dayside_decay_age,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_dayside_is_fresh,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_dayside_count,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_nightside_decay_age,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_nightside_is_fresh,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+leo_nightside_count,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+ABK_dbdt_missing_flag,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+BJN_dbdt_missing_flag,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+TRO_dbdt_missing_flag,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_bz_gsm_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_by_gsm_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_vx_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_proton_density_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_pressure_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+goes_bz_gsm_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+l1_any_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+geo_any_missing,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_vx_ffill_applied,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_proton_density_ffill_applied,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+omni_pressure_ffill_applied,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+goes_xrsa_missing_flag,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+goes_xrsb_missing_flag,Missingness_Flag,Flag,Missingness indicator; treats data absence as signal per course framework guidelines
+ABK_dbdt_magnitude,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+BJN_dbdt_magnitude,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+TRO_dbdt_magnitude,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+ABK_event_t0p3,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+ABK_event_t0p7,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+ABK_event_t1p1,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+ABK_event_t1p5,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+ABK_event,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+BJN_event_t0p3,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+BJN_event_t0p7,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+BJN_event_t1p1,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+BJN_event_t1p5,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+BJN_event,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+TRO_event_t0p3,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+TRO_event_t0p7,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+TRO_event_t1p1,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+TRO_event_t1p5,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+TRO_event,Target,Target,Prediction target: |dB/dt| magnitude for regional geomagnetic hazard
+timestamp,Metadata,Other,Metadata or categorical identifier

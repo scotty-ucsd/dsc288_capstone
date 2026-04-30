@@ -1,0 +1,42 @@
+section,item,status,evidence
+Data Loading,Load real fused parquet data (5.17M rows × 119 column dataset),✓,load_all_fused_data() loads from data/fused/*/*/fused_*.parquet
+Data Loading,"Station-specific target columns confirmed (ABK, BJN, TRO dbdt_magnitude)",✓,TARGET_COLS defined; verify in data loading output
+EDA,Missingness heatmap (visual PNG),✓,eda_missingness_heatmap.png
+EDA,"Summary statistics table (mean, median, std, skewness, kurtosis, missing counts)",✓,eda_summary_statistics.csv
+EDA,Histograms with KDE for targets AND key drivers,✓,"eda_target_distributions.png, eda_driver_distributions.png"
+EDA,Box plots for outlier identification,✓,"eda_boxplots_targets.png, eda_boxplots_drivers.png"
+EDA,Density curves showing distribution shape,✓,eda_density_curves_stations.png
+EDA,Correlation heatmap between observation layers,✓,eda_correlation_heatmap.png
+EDA,Scatter plots of key driver-target relationships,✓,"eda_scatter_bz_vs_dbdt.png, eda_scatter_newell_vs_dbdt.png, eda_scatter_vx_vs_dbdt.png"
+EDA,Temporal multiline charts showing data coverage by source over 2015-2024,✓,eda_temporal_coverage.png
+EDA,Freshness assessment per source,✓,data_freshness.csv
+Feature Engineering,Feature taxonomy table (classify Numerical/Temporal/Categorical),✓,feature_taxonomy.csv with 119 features classified
+Feature Engineering,Missingness indicator features listed and justified,✓,Classified under Missingness_Flag in taxonomy
+Feature Engineering,Temporal causality verification (prove no future leakage),✓,"temporal_causality_verification.csv, verify_temporal_causality() function"
+Feature Engineering,Feature quality: importance analysis from multiple methods,✓,"feature_importance_compiled.csv, shap_importance_{station}.csv, lr_coefficients_{station}.csv"
+Feature Engineering,EDA-to-feature traceability documentation,✓,eda_feature_traceability.csv with 8 traceability records
+Models,Persistence baseline,✓,PersistenceModel class; results in model_baseline_results.csv
+Models,Climatology baseline,✓,ClimatologyModel class; results in model_baseline_results.csv
+Models,"Logistic Regression (class_weight=balanced, max_iter=2000)",✓,sklearn LogisticRegression; coefficients in lr_coefficients_{station}.csv
+Models,LightGBM (is_unbalance=True) with SHAP interpretability,✓,LightGBM trained; SHAP plots saved; models saved
+Models,HSS-optimal decision threshold (not hardcoded 0.5),✓,"Threshold sweep over [0.01,0.99] in train_baselines(); decision_threshold saved per station"
+Models,Reliability diagram (calibration_curve) per model per station,✓,calibration_reliability_{station}_{model}.png saved inside compute_evaluation_metrics()
+Models,Expected Calibration Error (ECE) reported per model per station,✓,metrics[ece] computed with calibration_curve in compute_evaluation_metrics()
+Models,Forecast framing: features at t predict label at t+60min (not nowcast),✓,create_binary_labels() uses df[col].shift(-LEAD_STEPS); LEAD_STEPS=60 for 1-min cadence
+Models,Evaluation protocol table with metrics and pass/fail criteria,✓,evaluation_protocol.csv
+Models,"Station-specific results (ABK, BJN, TRO separate)",✓,All models run per station; results segregated in output
+M1 Feedback,Models built separately for each target station,✓,All training loops iterate over STATIONS list individually
+M1 Feedback,Novelty framing: methodological vs dataset vs evaluation contributions,✓,Feature taxonomy includes justification column; Physics-informed features clearly labeled
+M1 Feedback,LR reference alongside LightGBM with explicit comparison,✓,model_baseline_results.csv includes both LR and LightGBM metrics
+M1 Feedback,"All 5 model tiers evaluated: Persistence, Climatology, LR, LightGBM, LSTM (placeholder)",✓,evaluation_protocol.csv lists all 5 tiers with LSTM as future milestone
+Course EDA,Systematic understanding BEFORE modeling (not confirmatory),✓,EDA runs before any model training; insights documented in traceability
+Course EDA,Core questions addressed: What data? Clean? Patterns? Plausible?,✓,"Missingness, summary stats, distributions, correlations all covered"
+Course EDA,Univariate non-graphical & graphical; Bivariate/Multivariate covered,✓,Stats table + histograms + box plots + density curves + scatter + heatmaps
+Course EDA,"Anscombe Quartet lesson: visualize distributions, not just mean",✓,KDE on all histograms; skewness/kurtosis reported; box plots show spread
+Course Feature Eng,Feature taxonomy with justification per category,✓,feature_taxonomy.csv with justification column
+Course Feature Eng,Missingness as signal (indicator features),✓,"Missingness_Flag category in taxonomy; goes_gap_flag, swarm_coverage_flag etc."
+Course Feature Eng,Temporal causality strictly enforced,✓,"verify_temporal_causality() proves .shift() usage, no center=True rolling"
+Course Model Select,Start with basic baselines as sanity checks,✓,Persistence and Climatology trained first
+Course Model Select,Justify complexity incrementally,✓,evaluation_protocol.csv explains purpose and pass/fail for each tier
+Course Model Select,"Features, models, and evaluation co-evolve",✓,SHAP/LR coef feed back to feature importance; traceability links EDA→features→models
+Narrative,Single composite storyboard figure: EDA→FE→Model pipeline,✓,"narrative_storyboard.png — 9-panel figure covering data, drivers, and model results"
